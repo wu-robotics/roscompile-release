@@ -1,0 +1,12 @@
+Source: ros-indigo-roscompile
+Section: misc
+Priority: extra
+Maintainer: David V. Lu!! <davidvlu@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), python-urlgrabber, ros-indigo-catkin, ros-indigo-resource-retriever, ros-indigo-rospack, ros-indigo-rospy
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-indigo-roscompile
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, python-urlgrabber, ros-indigo-resource-retriever, ros-indigo-rospack, ros-indigo-rospy
+Description: The roscompile package
