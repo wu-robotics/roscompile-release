@@ -2,6 +2,7 @@ import os
 import os.path
 import collections
 import sys
+import re
 from roscompile.launch import Launch
 from roscompile.source import Source
 from roscompile.setup_py import SetupPy
@@ -10,7 +11,7 @@ from roscompile.plugin_xml import PluginXML
 from roscompile.cmake import CMake
 from roscompile.config import CFG
 
-SRC_EXTS = ['.py', '.cpp', '.h']
+SRC_EXTS = ['.py', '.cpp', '.h', '.hpp']
 CONFIG_EXTS = ['.yaml', '.rviz']
 DATA_EXTS = ['.dae', '.jpg', '.stl', '.png']
 MODEL_EXTS = ['.urdf', '.xacro', '.srdf']
@@ -20,6 +21,8 @@ BASIC = ['package.xml', 'CMakeLists.txt']
 SIMPLE = ['.launch', '.msg', '.srv', '.action']
 PLUGIN_CONFIG = 'plugins'
 EXTRA = 'Extra!'
+
+MAINPAGE_S = "/\*\*\s+\\\\mainpage\s+\\\\htmlinclude manifest.html\s+\\\\b %s\s+<!--\s+Provide an overview of your package.\s+-->\s+-->\s+[^\*]*\*/"
 
 def query(s):
     return raw_input(s).decode(sys.stdin.encoding)
@@ -37,7 +40,7 @@ class Package:
         self.manifest = PackageXML(self.root + '/package.xml')
         self.cmake = CMake(self.root + '/CMakeLists.txt', self.name)
         self.files = self.sort_files()
-        self.sources = [Source(source) for source in self.files['source']]
+        self.sources = [Source(source, self.root) for source in self.files['source']]
 
     def sort_files(self, print_extras=False):
         data = collections.defaultdict(list)
@@ -50,7 +53,7 @@ class Package:
             for fn in files:
                 ext = os.path.splitext(fn)[-1]
                 full = '%s/%s'%(root, fn)
-                if fn[-1]=='~':
+                if fn[-1]=='~' or fn[-4:]=='.pyc':
                     continue
                 ext_match = match(ext)
 
@@ -72,6 +75,12 @@ class Package:
                             break
                     if found:
                         continue   
+                        
+                    with open(full) as f:
+                        l = f.readline()
+                        if '#!' in l and 'python' in l:
+                            data['source'].append(full)
+                            continue
 
                     data[EXTRA].append(full)
         if print_extras and len(data[EXTRA])>0:
@@ -105,6 +114,14 @@ class Package:
         else:
             return self.get_run_dependencies()
 
+    def get_message_dependencies(self, exclude_python=True):
+        d = set()
+        for src in self.sources:
+            if exclude_python and src.python:
+                continue
+            d.update( src.get_message_dependencies() )
+        return sorted(list(d))
+
     def update_manifest(self):
         for build in [True, False]:
             dependencies = self.get_dependencies(build)
@@ -131,6 +148,9 @@ class Package:
     def update_cmake(self):
         self.cmake.check_dependencies( self.get_dependencies() )        
 
+        if CFG.should('check_exported_dependencies'):
+            self.cmake.check_exported_dependencies(self.name, self.get_message_dependencies())
+
         self.cmake.check_generators( self.files['msg'], self.files['srv'], self.files['action'], self.files['cfg'])
         
         setup = self.get_setup_py()
@@ -138,6 +158,11 @@ class Package:
             'catkin_python_setup' not in self.cmake.content_map:
             self.cmake.add_command('catkin_python_setup()')
             
+        if CFG.should('check_installs'):    
+            self.cmake.update_cplusplus_installs()
+            if setup:
+                self.cmake.update_python_installs(setup.execs)    
+
         self.cmake.output()
 
     def get_python_source(self):
@@ -191,6 +216,14 @@ class Package:
     def update_people(self, people, replace={}):
         self.manifest.update_people('maintainer', people, replace)
         self.manifest.update_people('author', people, replace)
+
+    def remove_useless(self):
+        mainpage_pattern = re.compile(MAINPAGE_S % self.name)
+        for fn in self.files[EXTRA]:
+            if 'mainpage.dox' in fn:
+                s = open(fn).read()
+                if mainpage_pattern.match(s):
+                    os.remove(fn)
 
 def get_packages(root_fn='.'):
     packages = []
