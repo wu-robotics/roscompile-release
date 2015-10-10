@@ -17,6 +17,14 @@ ORDERING = ['cmake_minimum_required', 'project', 'find_package', 'catkin_python_
 
 SHOULD_ALPHABETIZE = ['COMPONENTS', 'DEPENDENCIES', 'FILES', 'CATKIN_DEPENDS']
 
+INSTALL_CONFIGS = {
+    'exec':    ('TARGETS', {'${CATKIN_PACKAGE_BIN_DESTINATION}': 'RUNTIME DESTINATION'}),
+    'library': ('TARGETS', {'${CATKIN_PACKAGE_LIB_DESTINATION}': ('ARCHIVE DESTINATION', 'LIBRARY DESTINATION'),
+                            '${CATKIN_GLOBAL_BIN_DESTINATION}':  'RUNTIME DESTINATION'}),
+    'headers': ('FILES',   {'${CATKIN_PACKAGE_INCLUDE_DESTINATION}': 'DESTINATION'}),
+    'misc':    ('FILES',   {'${CATKIN_PACKAGE_SHARE_DESTINATION}':   'DESTINATION'})
+    }
+
 def get_ordering_index(cmd):
     for i, o in enumerate(ORDERING):
         if type(o)==list:
@@ -27,6 +35,20 @@ def get_ordering_index(cmd):
     if cmd:        
         print '\tUnsure of ordering for', cmd        
     return len(ORDERING)                
+
+def get_install_type(destination):
+    for name, (ft, m) in INSTALL_CONFIGS.iteritems():
+        if destination in m:
+            return name
+            
+def install_sections(cmd, D):
+    for destination, value in D.iteritems():
+        if type(value)==str:
+            keys = [value]
+        else:
+            keys = value
+        for key in keys:
+            cmd.check_complex_section(key, destination)
 
 class Section:
     def __init__(self, name='', values=None, pre='', tab=None):
@@ -40,6 +62,9 @@ class Section:
         
     def add(self, v):
         self.values.append(v)
+        
+    def remove_pattern(self, pattern):
+        self.values = [v for v in self.values if pattern not in v]
         
     def is_valid(self):
         return len(self.name)>0 or len(self.values)>0    
@@ -74,6 +99,9 @@ class Command:
             if s.name==key:
                 return s
         return None
+        
+    def get_sections(self, key):
+        return [s for s in self.sections if s.name==key]
 
     def add_section(self, key, values=[]):
         self.sections.append(Section(key, values))
@@ -81,6 +109,32 @@ class Command:
     def add(self, section):
         if section:
             self.sections.append(section)
+            
+    def check_complex_section(self, key, value):
+        words = key.split()
+        if len(words)==1:
+            section = self.get_section(key)
+        else:
+            i = 0
+            section = None
+            for section_i in self.sections:
+                if section_i.name == words[i]:
+                    if i < len(words)-1:
+                        i += 1
+                    else:
+                        section = section_i
+                        break
+                else:
+                    i = 0
+            
+        if section:
+            if value not in section.values:
+                section.add(value)
+        else:
+            self.add_section(key, [value])
+
+    def first_token(self):
+        return self.sections[0].values[0]
         
     def __repr__(self):
         s = self.cmd + '('
@@ -146,10 +200,121 @@ class CMake:
         if len(cfgs)>0:
             self.section_check(['dynamic_reconfigure'], 'find_package', 'COMPONENTS')
 
-    def add_command(self, s):
-        cmd = c_scanner.parse(s)
+    def add_command(self, s='', cmd=None):
+        if cmd is None:
+            cmd = c_scanner.parse(s)
+        if len(self.contents)>0 and type(self.contents[-1])!=str:
+            self.contents.append('\n')
         self.contents.append(cmd)
         self.content_map[cmd.cmd].append(cmd)
+        
+    def remove_command(self, cmd):
+        print '\tRemoving %s'%str(cmd).replace('\n', ' ').replace('  ', '')
+        self.contents.remove(cmd)
+        self.content_map[cmd.cmd].remove(cmd)
+        
+    def get_libraries(self):
+        return [cmd.first_token() for cmd in self.content_map['add_library']]
+        
+    def get_executables(self):
+        return [cmd.first_token() for cmd in self.content_map['add_executable']]    
+        
+    def check_exported_dependencies(self, pkg_name, deps):
+        if len(deps)==0:
+            return
+        if pkg_name in deps:
+            self_depend = True
+            if len(deps)==1:
+                cat_depend = False
+            else:
+                cat_depend = True
+        else:
+            self_depend = False
+            cat_depend = True
+
+        marks = []
+        if cat_depend:
+            marks.append('${catkin_EXPORTED_TARGETS}')
+        if self_depend:
+            marks.append('${%s_EXPORTED_TARGETS}'%pkg_name)
+
+        targets = self.get_libraries() + self.get_executables()
+            
+        for cmd in self.content_map['add_dependencies']:
+            target = cmd.first_token()
+            if target in targets:
+                targets.remove(target)
+                cmd.sections[0].remove_pattern('_generate_messages_cpp')
+                cmd.sections[0].remove_pattern('_gencpp')
+                if cat_depend and '${catkin_EXPORTED_TARGETS}' not in cmd.sections[0].values:
+                    cmd.sections[0].add('${catkin_EXPORTED_TARGETS}')
+                if self_depend and '${%s_EXPORTED_TARGETS}'%pkg_name not in cmd.sections[0].values:
+                    cmd.sections[0].add('${%s_EXPORTED_TARGETS}'%pkg_name)
+
+        for target in targets:
+            self.add_command('add_dependencies(%s %s)'%(target, ' '.join(marks)))
+
+    def get_commands_by_type(self, name):
+        matches = []
+        for cmd in self.content_map['install']:
+            found = False
+            for section in cmd.get_sections('DESTINATION'):
+                destination = section.values[0]
+                if get_install_type(destination)==name:
+                    matches.append(cmd)
+                    found = True
+                    break
+        return matches  
+            
+    def install_section_check(self, items, install_type, directory=False):
+        section_name, destination_map = INSTALL_CONFIGS[install_type]
+        if directory and section_name == 'FILES':
+            section_name = 'DIRECTORY'
+        cmds = self.get_commands_by_type(install_type)
+        if len(items)==0:
+            for cmd in cmds:
+                self.remove_command(cmd)
+            return
+            
+        cmd = None
+        for cmd in cmds:
+            install_sections(cmd, destination_map)
+            section = cmd.get_section(section_name)
+            section.values = [value for value in section.values if value in items]
+            items = [item for item in items if item not in section.values]
+            
+        if len(items)==0:
+            return
+            
+        if cmd is None:
+            print '\tInstalling ', ', '.join(items)
+            cmd = Command('install')
+            cmd.add_section(section_name, items)
+            self.add_command('', cmd)
+            install_sections(cmd, destination_map)
+        else:
+            section = cmd.get_section(section_name)
+            section.values += items
+        
+                    
+        
+
+    def update_cplusplus_installs(self):
+        self.install_section_check( self.get_executables(), 'exec' )
+        self.install_section_check( self.get_libraries(), 'library' )
+        self.install_section_check( ['include/${PROJECT_NAME}/'], 'headers', True)
+        
+    def update_misc_installs(self, items, directory=False):
+        self.install_section_check( items, 'misc', directory)
+
+    def update_python_installs(self, execs):
+        if len(execs)==0:
+            return
+        cmd = 'catkin_install_python'
+        if cmd not in self.content_map:
+            self.add_command('%s(PROGRAMS %s\n                      DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})'%(cmd, ' '.join(execs)))
+        else:
+            self.section_check(execs, cmd, 'PROGRAMS')    
 
     def enforce_ordering(self):
         chunks = []
@@ -160,6 +325,8 @@ class CMake:
             if x.__class__==Command:
                 if x.cmd == 'if':
                     group = 'endif'
+                elif x.cmd == 'foreach':
+                    group = 'endforeach'
                 elif x.cmd == group:
                     chunks.append( ('group', current))
                     current = []
