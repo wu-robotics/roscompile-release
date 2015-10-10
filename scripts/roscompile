@@ -3,7 +3,11 @@
 from roscompile.package import Package, get_packages, get_people_info
 from roscompile.config import CFG
 
-pkgs = get_packages()
+try:
+    pkgs = get_packages()
+except:
+    print 'roscompile only supports catkin format 1'
+    exit()
 
 if CFG.should('check_names'):
     people, replace = get_people_info(pkgs)
@@ -20,6 +24,9 @@ for package in pkgs:
 
     if CFG.should('update_cmake'):
         package.update_cmake()
+        
+    if CFG.should('remove_useless'):
+        package.remove_useless()
 
     if CFG.should('generate_setup_py'):
         package.generate_setup()
