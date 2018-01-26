@@ -1,37 +1,11 @@
 #!/usr/bin/python
 
-from roscompile.package import Package, get_packages, get_people_info
-from roscompile.config import CFG
+from ros_introspection.util import get_packages
+from roscompile import get_functions
 
-try:
-    pkgs = get_packages()
-except:
-    print 'roscompile only supports catkin format 1'
-    exit()
-
-if CFG.should('check_names'):
-    people, replace = get_people_info(pkgs)
+pkgs = get_packages()
 
 for package in pkgs:
-    print package.name
-    if CFG.should('check_names'):
-        package.update_people(people, replace)
-
-    if CFG.should('update_manifest'):
-        package.update_manifest()
-    elif CFG.should('check_names'):
-        package.manifest.output()        
-
-    if CFG.should('update_cmake'):
-        package.update_cmake()
-        
-    if CFG.should('remove_useless'):
-        package.remove_useless()
-
-    if CFG.should('generate_setup_py'):
-        package.generate_setup()
-
-    if CFG.should('check_plugins'):
-        package.check_plugins()
-
-CFG.write()
+    for name, fne in get_functions().iteritems():
+        fne(package)
+    package.write()
