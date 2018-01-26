@@ -1,230 +1,81 @@
-from collections import defaultdict, OrderedDict
-import re
-import os.path
-from resource_retriever import get
-from roscompile.config import CFG
-
-BREAKERS = ['catkin_package']
-ALL_CAPS = re.compile('^[A-Z_]+$')
-IGNORE_LINES = [s + '\n' for s in get('package://roscompile/data/cmake.ignore').read().split('\n') if len(s)>0]
-IGNORE_PATTERNS = [s + '\n' for s in get('package://roscompile/data/cmake_patterns.ignore').read().split('\n') if len(s)>0]
-
-ORDERING = ['cmake_minimum_required', 'project', 'find_package', 'catkin_python_setup', 'add_definitions',
-            'add_message_files', 'add_service_files', 'add_action_files', 'generate_dynamic_reconfigure_options',
-            'generate_messages', 'catkin_package', 
-            ['add_library', 'add_executable', 'target_link_libraries', 'add_dependencies', 'include_directories'],
-            'catkin_add_gtest', 'group', 'install']
+from ros_introspection.cmake import Command, CommandGroup, get_ordering_index, BUILD_TARGET_COMMANDS
+from ros_introspection.source_code_file import CPLUS
+from ros_introspection.resource_list import is_message, is_service
+from util import get_ignore_data, roscompile
 
 SHOULD_ALPHABETIZE = ['COMPONENTS', 'DEPENDENCIES', 'FILES', 'CATKIN_DEPENDS']
 
-INSTALL_CONFIGS = {
-    'exec':    ('TARGETS', {'${CATKIN_PACKAGE_BIN_DESTINATION}': 'RUNTIME DESTINATION'}),
-    'library': ('TARGETS', {'${CATKIN_PACKAGE_LIB_DESTINATION}': ('ARCHIVE DESTINATION', 'LIBRARY DESTINATION'),
-                            '${CATKIN_GLOBAL_BIN_DESTINATION}':  'RUNTIME DESTINATION'}),
-    'headers': ('FILES',   {'${CATKIN_PACKAGE_INCLUDE_DESTINATION}': 'DESTINATION'}),
-    'misc':    ('FILES',   {'${CATKIN_PACKAGE_SHARE_DESTINATION}':   'DESTINATION'})
-    }
 
-def get_ordering_index(cmd):
-    for i, o in enumerate(ORDERING):
-        if type(o)==list:
-            if cmd in o:
-                return i
-        elif cmd==o:
-            return i
-    if cmd:        
-        print '\tUnsure of ordering for', cmd        
-    return len(ORDERING)                
+def check_cmake_dependencies_helper(cmake, dependencies, check_catkin_pkg=True):
+    if len(dependencies) == 0:
+        return
+    if len(cmake.content_map['find_package']) == 0:
+        cmd = Command('find_package')
+        cmd.add_section('', ['catkin'])
+        cmd.add_section('REQUIRED')
+        cmake.add_command(cmd)
 
-def get_install_type(destination):
-    for name, (ft, m) in INSTALL_CONFIGS.iteritems():
-        if destination in m:
-            return name
-            
-def install_sections(cmd, D):
-    for destination, value in D.iteritems():
-        if type(value)==str:
-            keys = [value]
-        else:
-            keys = value
-        for key in keys:
-            cmd.check_complex_section(key, destination)
+    for cmd in cmake.content_map['find_package']:
+        if cmd.get_tokens()[0] == 'catkin' and cmd.get_section('REQUIRED'):
+            section = cmd.get_section('COMPONENTS')
+            if section is None:
+                cmd.add_section('COMPONENTS', sorted(dependencies))
+            else:
+                needed_items = dependencies - set(section.values)
+                section.values += list(sorted(needed_items))
+                cmd.changed = True
+    if check_catkin_pkg:
+        cmake.section_check(dependencies, 'catkin_package', 'CATKIN_DEPENDS')
 
-class Section:
-    def __init__(self, name='', values=None, pre='', tab=None):
-        self.name = name
-        if values is None:
-            self.values = []
-        else:    
-            self.values = values
-        self.pre = pre
-        self.tab = tab
-        
-    def add(self, v):
-        self.values.append(v)
-        
-    def remove_pattern(self, pattern):
-        self.values = [v for v in self.values if pattern not in v]
-        
-    def is_valid(self):
-        return len(self.name)>0 or len(self.values)>0    
-        
-    def __repr__(self):
-        if CFG.should('alphabetize_cmake_options') and self.name in SHOULD_ALPHABETIZE:
-            self.values = sorted(self.values)
-    
-        s = self.pre
-        if len(self.name)>0:
-            s += self.name
-            if self.tab is None and len(self.values)>0:
-                s += ' '
-            elif len(self.values)>0:
-                s += '\n' + ' ' *self.tab
-        if self.tab is None:
-            s += ' '.join(self.values)
-        else:
-            s += ('\n' + ' '*self.tab).join(self.values)
-        return s
 
-class Command:
-    def __init__(self, cmd):
-        self.cmd = cmd
-        self.inline_count = -1
-        self.tab = 0
+@roscompile
+def check_cmake_dependencies(package):
+    dependencies = package.get_dependencies_from_msgs()
+    dependencies.update(package.get_build_dependencies())
+    check_cmake_dependencies_helper(package.cmake, dependencies)
 
-        self.sections = []
-            
-    def get_section(self, key):
-        for s in self.sections:
-            if s.name==key:
-                return s
-        return None
-        
-    def get_sections(self, key):
-        return [s for s in self.sections if s.name==key]
 
-    def add_section(self, key, values=[]):
-        self.sections.append(Section(key, values))
-        
-    def add(self, section):
-        if section:
-            self.sections.append(section)
-            
-    def check_complex_section(self, key, value):
-        words = key.split()
-        if len(words)==1:
-            section = self.get_section(key)
-        else:
-            i = 0
-            section = None
-            for section_i in self.sections:
-                if section_i.name == words[i]:
-                    if i < len(words)-1:
-                        i += 1
-                    else:
-                        section = section_i
-                        break
-                else:
-                    i = 0
-            
-        if section:
-            if value not in section.values:
-                section.add(value)
-        else:
-            self.add_section(key, [value])
+def get_matching_add_depends(cmake, search_target):
+    for cmd in cmake.content_map['add_dependencies']:
+        target = cmd.first_token()
+        if target == search_target:
+            return cmd
 
-    def first_token(self):
-        return self.sections[0].values[0]
-        
-    def __repr__(self):
-        s = self.cmd + '('
-        s += ' '.join(map(str,self.sections))
-        if '\n' in s:
-            s += '\n'
-        s += ')'
-        return s
 
-from roscompile.cmake_parser import scanner, c_scanner
+def match_generator_name(package, name):
+    for gen in package.get_all_generators():
+        if name == gen.base_name:
+            return gen
 
-class CMake:
-    def __init__(self, fn, name=None):
-        self.fn = fn
-        self.name = name        
-        self.contents = scanner.parse(fn)
-        self.content_map = defaultdict(list)
-        for c in self.contents:
-            if type(c)==str:
+
+def get_msg_dependencies_from_source(package, sources):
+    deps = set()
+    for rel_fn in sources:
+        src = package.source_code.sources[rel_fn]
+        for pkg, name in src.search_lines_for_pattern(CPLUS):
+            if len(name) == 0 or name[-2:] != '.h':
                 continue
-            self.content_map[ c.cmd ].append(c) 
+            name = name.replace('.h', '')
+            if is_message(pkg, name) or is_service(pkg, name):
+                deps.add(pkg)
+            elif pkg == package.name and match_generator_name(package, name):
+                deps.add(pkg)
+    if package.dynamic_reconfigs:
+        deps.add(package.name)
+    return sorted(list(deps))
 
-    def section_check(self, items, cmd_name, section_name):        
-        if len(items)==0:
-            return
-            
-        if cmd_name not in self.content_map:
-            params = section_name + ' '  + ' '.join(items)
-            self.add_command('%s(%s)'%(cmd_name,params))
-            print '\tAdding new %s command to CMakeLists.txt with %s' % (cmd_name, params)
-            return    
-            
-        section = None
-        for cmd in self.content_map[cmd_name]:
-            s = cmd.get_section(section_name)
-            if s:
-                if section is None:
-                    section = s
-                items = [item for item in items if item not in s.values]
-        if len(items)==0:
-            return        
-        if section:        
-            section.values += items
-        else:
-            cmd.add_section(section_name, items)
-        print '\tAdding %s to the %s/%s section of your CMakeLists.txt'%(str(items), cmd_name, section_name)
-            
-    def check_dependencies(self, pkgs):
-        self.section_check(pkgs, 'find_package', 'COMPONENTS')
-        self.section_check(pkgs, 'catkin_package', 'CATKIN_DEPENDS')
-        
-    def check_generators(self, msgs, srvs, actions, cfgs):
-        self.section_check( map(os.path.basename, msgs), 'add_message_files', 'FILES')
-        self.section_check( map(os.path.basename, srvs), 'add_service_files', 'FILES')
-        self.section_check( map(os.path.basename, actions), 'add_action_files', 'FILES')
-        
-        if len(msgs)+len(srvs)+len(actions) > 0:
-            self.section_check(['message_generation'], 'find_package', 'COMPONENTS')
-            self.section_check(['message_runtime'], 'catkin_package', 'CATKIN_DEPENDS')
-        
-        cfgs = ['cfg/' + os.path.basename(cfg) for cfg in cfgs]    
-        self.section_check( cfgs, 'generate_dynamic_reconfigure_options', '')
-        if len(cfgs)>0:
-            self.section_check(['dynamic_reconfigure'], 'find_package', 'COMPONENTS')
 
-    def add_command(self, s='', cmd=None):
-        if cmd is None:
-            cmd = c_scanner.parse(s)
-        if len(self.contents)>0 and type(self.contents[-1])!=str:
-            self.contents.append('\n')
-        self.contents.append(cmd)
-        self.content_map[cmd.cmd].append(cmd)
-        
-    def remove_command(self, cmd):
-        print '\tRemoving %s'%str(cmd).replace('\n', ' ').replace('  ', '')
-        self.contents.remove(cmd)
-        self.content_map[cmd.cmd].remove(cmd)
-        
-    def get_libraries(self):
-        return [cmd.first_token() for cmd in self.content_map['add_library']]
-        
-    def get_executables(self):
-        return [cmd.first_token() for cmd in self.content_map['add_executable']]    
-        
-    def check_exported_dependencies(self, pkg_name, deps):
-        if len(deps)==0:
-            return
-        if pkg_name in deps:
+@roscompile
+def check_exported_dependencies(package):
+    targets = package.cmake.get_target_build_rules()
+    for target, sources in targets.iteritems():
+        deps = get_msg_dependencies_from_source(package, sources)
+        if len(deps) == 0:
+            continue
+
+        if package.name in deps:
             self_depend = True
-            if len(deps)==1:
+            if len(deps) == 1:
                 cat_depend = False
             else:
                 cat_depend = True
@@ -232,137 +83,264 @@ class CMake:
             self_depend = False
             cat_depend = True
 
-        marks = []
-        if cat_depend:
-            marks.append('${catkin_EXPORTED_TARGETS}')
+        add_deps = get_matching_add_depends(package.cmake, target)
+        if add_deps is None:
+            add_deps = Command('add_dependencies')
+            package.cmake.add_command(add_deps)
+
+        if len(add_deps.sections) == 0:
+            add_deps.add_section('', [target])
+            add_deps.changed = True
+
+        section = add_deps.sections[0]
+        if cat_depend and '${catkin_EXPORTED_TARGETS}' not in section.values:
+            section.add('${catkin_EXPORTED_TARGETS}')
+            add_deps.changed = True
         if self_depend:
-            marks.append('${%s_EXPORTED_TARGETS}'%pkg_name)
+            tokens = [package.cmake.resolve_variables(s) for s in section.values]
+            key = '${%s_EXPORTED_TARGETS}' % package.name
+            if key not in tokens:
+                section.add(key)
+                add_deps.changed = True
 
-        targets = self.get_libraries() + self.get_executables()
-            
-        for cmd in self.content_map['add_dependencies']:
-            target = cmd.first_token()
-            if target in targets:
-                targets.remove(target)
-                cmd.sections[0].remove_pattern('_generate_messages_cpp')
-                cmd.sections[0].remove_pattern('_gencpp')
-                if cat_depend and '${catkin_EXPORTED_TARGETS}' not in cmd.sections[0].values:
-                    cmd.sections[0].add('${catkin_EXPORTED_TARGETS}')
-                if self_depend and '${%s_EXPORTED_TARGETS}'%pkg_name not in cmd.sections[0].values:
-                    cmd.sections[0].add('${%s_EXPORTED_TARGETS}'%pkg_name)
 
-        for target in targets:
-            self.add_command('add_dependencies(%s %s)'%(target, ' '.join(marks)))
+def remove_pattern(section, pattern):
+    prev_len = len(section.values)
+    section.values = [v for v in section.values if pattern not in v]
+    return prev_len != len(section.values)
 
-    def get_commands_by_type(self, name):
-        matches = []
-        for cmd in self.content_map['install']:
-            found = False
-            for section in cmd.get_sections('DESTINATION'):
-                destination = section.values[0]
-                if get_install_type(destination)==name:
-                    matches.append(cmd)
-                    found = True
-                    break
-        return matches  
-            
-    def install_section_check(self, items, install_type, directory=False):
-        section_name, destination_map = INSTALL_CONFIGS[install_type]
-        if directory and section_name == 'FILES':
-            section_name = 'DIRECTORY'
-        cmds = self.get_commands_by_type(install_type)
-        if len(items)==0:
-            for cmd in cmds:
-                self.remove_command(cmd)
-            return
-            
-        cmd = None
-        for cmd in cmds:
-            install_sections(cmd, destination_map)
-            section = cmd.get_section(section_name)
-            section.values = [value for value in section.values if value in items]
-            items = [item for item in items if item not in section.values]
-            
-        if len(items)==0:
-            return
-            
-        if cmd is None:
-            print '\tInstalling ', ', '.join(items)
-            cmd = Command('install')
-            cmd.add_section(section_name, items)
-            self.add_command('', cmd)
-            install_sections(cmd, destination_map)
+
+@roscompile
+def remove_old_style_cpp_dependencies(package):
+    global_changed = False
+    targets = package.cmake.get_target_build_rules()
+    for target, sources in targets.iteritems():
+        add_deps = get_matching_add_depends(package.cmake, target)
+        if add_deps is None or len(add_deps.sections) == 0:
+            continue
+
+        section = add_deps.sections[0]
+        changed = remove_pattern(section, '_generate_messages_cpp')
+        changed = remove_pattern(section, '_gencpp') or changed
+        if changed:
+            add_deps.changed = True
+            global_changed = True
+    if global_changed:
+        check_exported_dependencies(package)
+
+
+@roscompile
+def target_catkin_libraries(package):
+    CATKIN = '${catkin_LIBRARIES}'
+    targets = package.cmake.get_libraries() + package.cmake.get_executables()
+    for cmd in package.cmake.content_map['target_link_libraries']:
+        tokens = cmd.get_tokens()
+        if tokens[0] in targets:
+            if CATKIN not in tokens:
+                print '\tAdding %s to target_link_libraries for %s' % (CATKIN, tokens[0])
+                cmd.add_token(CATKIN)
+            targets.remove(tokens[0])
+            continue
+    for target in targets:
+        print '\tAdding target_link_libraries for %s' % target
+        cmd = Command('target_link_libraries')
+        cmd.add_section('', [target, CATKIN])
+        package.cmake.add_command(cmd)
+
+
+@roscompile
+def check_generators(package):
+    if len(package.generators) == 0:
+        return
+
+    for gen_type, cmake_cmd in [('msg', 'add_message_files'),
+                                ('srv', 'add_service_files'),
+                                ('action', 'add_action_files')]:
+        names = [gen.name for gen in package.generators[gen_type]]
+        package.cmake.section_check(names, cmake_cmd, 'FILES')
+
+    package.cmake.section_check(['message_generation'], 'find_package', 'COMPONENTS')
+    package.cmake.section_check(['message_runtime'], 'catkin_package', 'CATKIN_DEPENDS')
+    for cmd in package.cmake.content_map['catkin_package']:
+        section = cmd.get_section('CATKIN_DEPENDS')
+        if 'message_generation' in section.values:
+            section.values.remove('message_generation')
+            cmd.changed = True
+
+    package.cmake.section_check(package.get_dependencies_from_msgs(), 'generate_messages',
+                                'DEPENDENCIES', zero_okay=True)
+
+
+@roscompile
+def check_includes(package):
+    has_includes = False
+    if package.source_code.has_header_files():
+        package.cmake.section_check(['include'], 'catkin_package', 'INCLUDE_DIRS')
+        package.cmake.section_check(['include'], 'include_directories')
+        has_includes = True
+
+    if len(package.source_code.get_source_by_language('c++')) > 0:
+        package.cmake.section_check(['${catkin_INCLUDE_DIRS}'], 'include_directories')
+        has_includes = True
+
+    if not has_includes and 'include_directories' in package.cmake.content_map:
+        for cmd in package.cmake.content_map['include_directories']:
+            package.cmake.remove_command(cmd)
+
+
+@roscompile
+def check_library_setup(package):
+    package.cmake.section_check(package.cmake.get_libraries(), 'catkin_package', 'LIBRARIES')
+
+
+def alphabetize_sections_helper(cmake):
+    for content in cmake.contents:
+        if content.__class__ == Command:
+            for section in content.get_real_sections():
+                if section.name in SHOULD_ALPHABETIZE:
+                    section.values = sorted(section.values)
+        elif content.__class__ == CommandGroup:
+            alphabetize_sections_helper(content.sub)
+
+
+@roscompile
+def alphabetize_sections(package):
+    alphabetize_sections_helper(package.cmake)
+
+
+@roscompile
+def prettify_catkin_package_cmd(package):
+    for cmd in package.cmake.content_map['catkin_package']:
+        for section in cmd.get_real_sections():
+            section.style.prename = '\n    '
+        cmd.changed = True
+
+
+@roscompile
+def prettify_package_lists(package):
+    for cmd_name, section_name in [('find_package', 'COMPONENTS'), ('catkin_package', 'CATKIN_DEPENDS')]:
+        for cmd in package.cmake.content_map[cmd_name]:
+            for section in cmd.get_real_sections():
+                if section.name != section_name:
+                    continue
+                n = len(str(section))
+                if n > 120:
+                    section.style.name_val_sep = '\n        '
+                    section.style.val_sep = '\n        '
+                    cmd.changed = True
+
+
+@roscompile
+def prettify_msgs_srvs(package):
+    for cmd in package.cmake.content_map['add_message_files'] + package.cmake.content_map['add_service_files']:
+        for section in cmd.get_real_sections():
+            if len(section.values) > 1:
+                section.style.name_val_sep = '\n    '
+                section.style.val_sep = '\n    '
+            cmd.changed = True
+
+
+@roscompile
+def prettify_installs(package):
+    for cmd in package.cmake.content_map['install']:
+        cmd.changed = True
+        cmd.sections = [s for s in cmd.sections if type(s) != str]
+        zeroed = False
+        for section in cmd.sections[1:]:
+            if len(section.values) == 0:
+                section.style.prename = '\n        '
+                zeroed = True
+            elif not zeroed:
+                section.style.prename = '\n        '
+            else:
+                section.style.prename = ''
+
+
+def remove_empty_strings(a):
+    return filter(lambda x: x != '', a)
+
+
+def remove_cmake_command_comments_helper(command, ignorables, replacement=''):
+    for i, section in enumerate(command.sections):
+        if type(section) != str:
+            continue
+        for ignorable in ignorables:
+            while ignorable in command.sections[i]:
+                command.changed = True
+                command.sections[i] = command.sections[i].replace(ignorable, replacement)
+    if command.changed:
+        command.sections = remove_empty_strings(command.sections)
+        if command.sections == ['\n']:
+            command.sections = []
+
+
+def remove_cmake_comments_helper(cmake, ignorables, replacement=''):
+    for i, content in enumerate(cmake.contents):
+        if content.__class__ == Command:
+            remove_cmake_command_comments_helper(content, ignorables, replacement)
+        elif content.__class__ == CommandGroup:
+            remove_cmake_comments_helper(content.sub, ignorables, replacement)
         else:
-            section = cmd.get_section(section_name)
-            section.values += items
-        
-                    
-        
+            for ignorable in ignorables:
+                while ignorable in cmake.contents[i]:
+                    cmake.contents[i] = cmake.contents[i].replace(ignorable, replacement)
+    cmake.contents = remove_empty_strings(cmake.contents)
 
-    def update_cplusplus_installs(self):
-        self.install_section_check( self.get_executables(), 'exec' )
-        self.install_section_check( self.get_libraries(), 'library' )
-        self.install_section_check( ['include/${PROJECT_NAME}/'], 'headers', True)
-        
-    def update_misc_installs(self, items, directory=False):
-        self.install_section_check( items, 'misc', directory)
 
-    def update_python_installs(self, execs):
-        if len(execs)==0:
-            return
-        cmd = 'catkin_install_python'
-        if cmd not in self.content_map:
-            self.add_command('%s(PROGRAMS %s\n                      DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})'%(cmd, ' '.join(execs)))
-        else:
-            self.section_check(execs, cmd, 'PROGRAMS')    
+@roscompile
+def remove_boilerplate_cmake_comments(package):
+    ignorables = get_ignore_data('cmake', {'package': package.name})
+    remove_cmake_comments_helper(package.cmake, ignorables)
+    remove_empty_cmake_lines(package)
 
-    def enforce_ordering(self):
-        chunks = []
+
+@roscompile
+def remove_empty_cmake_lines(package):
+    for i, content in enumerate(package.cmake.contents[:-2]):
+        if str(content)[-1] == '\n' and package.cmake.contents[i + 1] == '\n' and package.cmake.contents[i + 2] == '\n':
+            package.cmake.contents[i + 1] = ''
+    package.cmake.contents = remove_empty_strings(package.cmake.contents)
+
+
+def get_cmake_clusters(cmake):
+    clusters = []
+    current = []
+    anchors = []
+    for content in cmake.contents:
+        current.append(content)
+        if type(content) == str:
+            continue
+
+        index = None
+        key = None
+        if content.__class__ == CommandGroup:
+            enforce_cmake_ordering_helper(content.sub)
+            index = get_ordering_index('group')
+            sections = content.initial_tag.get_real_sections()
+            if len(sections) > 0:
+                key = sections[0].name
+        else:  # Command
+            index = get_ordering_index(content.command_name)
+            if content.command_name in BUILD_TARGET_COMMANDS:
+                token = content.first_token()
+                if token not in anchors:
+                    anchors.append(token)
+                key = anchors.index(token)
+        clusters.append(((index, key), current))
         current = []
-        group = None
-        for x in self.contents:
-            current.append(x)
-            if x.__class__==Command:
-                if x.cmd == 'if':
-                    group = 'endif'
-                elif x.cmd == 'foreach':
-                    group = 'endforeach'
-                elif x.cmd == group:
-                    chunks.append( ('group', current))
-                    current = []
-                    group = None
-                elif group is None:    
-                    chunks.append( (x.cmd, current) )
-                    current = []
-        if len(current)>0:
-            chunks.append( (None, current) )
-        
-        self.contents = []
-            
-        for a,b in sorted(chunks, key=lambda d: get_ordering_index(d[0])):
-            self.contents += b
+    if len(current) > 0:
+        clusters.append(((get_ordering_index(None), None), current))
 
-    def __repr__(self):
-        return ''.join(map(str, self.contents))
+    return clusters
 
-    def output(self, fn=None):
-        if CFG.should('enforce_cmake_ordering'):
-            self.enforce_ordering()
-        
-        s = str(self)
-        
-        if CFG.should('remove_dumb_cmake_comments'):    
-            D = {'package': self.name}
-            for line in IGNORE_LINES:
-                s = s.replace(line, '')
-            for pattern in IGNORE_PATTERNS:
-                s = s.replace(pattern % D, '')    
-        if CFG.should('remove_empty_cmake_lines'):        
-            while '\n\n\n' in s:    
-                s = s.replace('\n\n\n', '\n\n')    
-        
-        if fn is None:
-            fn = self.fn
-        with open(fn, 'w') as cmake:
-            cmake.write(s)
 
+def enforce_cmake_ordering_helper(cmake):
+    clusters = get_cmake_clusters(cmake)
+    cmake.contents = []
+    for a, b in sorted(clusters, key=lambda x: x[0]):
+        cmake.contents += b
+
+
+@roscompile
+def enforce_cmake_ordering(package):
+    enforce_cmake_ordering_helper(package.cmake)
