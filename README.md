@@ -1,3 +1,28 @@
+## roscompile (kinetic) - 1.0.0-0
+
+The packages in the `roscompile` repository were released into the `kinetic` distro by running `/usr/bin/bloom-release roscompile --track kinetic --rosdistro kinetic` on `Fri, 26 Jan 2018 21:37:18 -0000`
+
+These packages were released:
+- `ros_introspection`
+- `roscompile`
+
+Version of package(s) in repository `roscompile`:
+
+- upstream repository: https://github.com/DLu/roscompile.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `1.0.0-0`
+
+Versions of tools used:
+
+- bloom version: `0.6.2`
+- catkin_pkg version: `0.3.9`
+- rosdep version: `0.11.8`
+- rosdistro version: `0.6.2`
+- vcstools version: `0.1.39`
+
+
 ## roscompile (indigo) - 1.0.0-0
 
 The packages in the `roscompile` repository were released into the `indigo` distro by running `/usr/bin/bloom-release roscompile --track indigo --rosdistro indigo` on `Fri, 26 Jan 2018 15:03:54 -0000`
