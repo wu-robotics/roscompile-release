@@ -1,9 +1,11 @@
-from ros_introspection.cmake import Command, CommandGroup, get_ordering_index, BUILD_TARGET_COMMANDS
+from ros_introspection.cmake import Command, CommandGroup, get_sort_key
 from ros_introspection.source_code_file import CPLUS
 from ros_introspection.resource_list import is_message, is_service
 from util import get_ignore_data, roscompile
 
 SHOULD_ALPHABETIZE = ['COMPONENTS', 'DEPENDENCIES', 'FILES', 'CATKIN_DEPENDS']
+NEWLINE_PLUS_4 = '\n    '
+NEWLINE_PLUS_8 = '\n        '
 
 
 def check_cmake_dependencies_helper(cmake, dependencies, check_catkin_pkg=True):
@@ -16,14 +18,16 @@ def check_cmake_dependencies_helper(cmake, dependencies, check_catkin_pkg=True):
         cmake.add_command(cmd)
 
     for cmd in cmake.content_map['find_package']:
-        if cmd.get_tokens()[0] == 'catkin' and cmd.get_section('REQUIRED'):
+        tokens = cmd.get_tokens()
+        if tokens and tokens[0] == 'catkin' and cmd.get_section('REQUIRED'):
             section = cmd.get_section('COMPONENTS')
             if section is None:
                 cmd.add_section('COMPONENTS', sorted(dependencies))
             else:
                 needed_items = dependencies - set(section.values)
-                section.values += list(sorted(needed_items))
-                cmd.changed = True
+                if len(needed_items) > 0:
+                    section.values += list(sorted(needed_items))
+                    cmd.changed = True
     if check_catkin_pkg:
         cmake.section_check(dependencies, 'catkin_package', 'CATKIN_DEPENDS')
 
@@ -84,9 +88,11 @@ def check_exported_dependencies(package):
             cat_depend = True
 
         add_deps = get_matching_add_depends(package.cmake, target)
+        add_add_deps = False
+
         if add_deps is None:
             add_deps = Command('add_dependencies')
-            package.cmake.add_command(add_deps)
+            add_add_deps = True  # Need to wait to add the command for proper sorting
 
         if len(add_deps.sections) == 0:
             add_deps.add_section('', [target])
@@ -102,6 +108,9 @@ def check_exported_dependencies(package):
             if key not in tokens:
                 section.add(key)
                 add_deps.changed = True
+
+        if add_add_deps:
+            package.cmake.add_command(add_deps)
 
 
 def remove_pattern(section, pattern):
@@ -122,6 +131,7 @@ def remove_old_style_cpp_dependencies(package):
         section = add_deps.sections[0]
         changed = remove_pattern(section, '_generate_messages_cpp')
         changed = remove_pattern(section, '_gencpp') or changed
+        changed = remove_pattern(section, '_gencfg') or changed
         if changed:
             add_deps.changed = True
             global_changed = True
@@ -167,8 +177,13 @@ def check_generators(package):
             section.values.remove('message_generation')
             cmd.changed = True
 
-    package.cmake.section_check(package.get_dependencies_from_msgs(), 'generate_messages',
-                                'DEPENDENCIES', zero_okay=True)
+    msg_deps = package.get_dependencies_from_msgs()
+    if msg_deps:
+        package.cmake.section_check(msg_deps, 'generate_messages',
+                                    'DEPENDENCIES', zero_okay=True)
+    else:
+        package.cmake.section_check(msg_deps, 'generate_messages',
+                                    zero_okay=True)
 
 
 @roscompile
@@ -212,12 +227,14 @@ def alphabetize_sections(package):
 def prettify_catkin_package_cmd(package):
     for cmd in package.cmake.content_map['catkin_package']:
         for section in cmd.get_real_sections():
-            section.style.prename = '\n    '
+            section.style.prename = NEWLINE_PLUS_4
         cmd.changed = True
 
 
 @roscompile
 def prettify_package_lists(package):
+    acceptable_styles = [(NEWLINE_PLUS_8, NEWLINE_PLUS_8), (NEWLINE_PLUS_4, NEWLINE_PLUS_8)]
+
     for cmd_name, section_name in [('find_package', 'COMPONENTS'), ('catkin_package', 'CATKIN_DEPENDS')]:
         for cmd in package.cmake.content_map[cmd_name]:
             for section in cmd.get_real_sections():
@@ -225,18 +242,32 @@ def prettify_package_lists(package):
                     continue
                 n = len(str(section))
                 if n > 120:
-                    section.style.name_val_sep = '\n        '
-                    section.style.val_sep = '\n        '
-                    cmd.changed = True
+                    key = section.style.name_val_sep, section.style.val_sep
+                    if key not in acceptable_styles:
+                        section.style.name_val_sep = NEWLINE_PLUS_4
+                        section.style.val_sep = NEWLINE_PLUS_8
+                        cmd.changed = True
 
+
+@roscompile
+def alphabetize_package_lists(package):
+    for cmd_name, section_name in [('find_package', 'COMPONENTS'), ('catkin_package', 'CATKIN_DEPENDS')]:
+        for cmd in package.cmake.content_map[cmd_name]:
+            for section in cmd.get_real_sections():
+                if section.name != section_name:
+                    continue
+                sorted_values = list(sorted(section.values))
+                if sorted_values != section.values:
+                    section.values = sorted_values
+                    cmd.changed = True
 
 @roscompile
 def prettify_msgs_srvs(package):
     for cmd in package.cmake.content_map['add_message_files'] + package.cmake.content_map['add_service_files']:
         for section in cmd.get_real_sections():
             if len(section.values) > 1:
-                section.style.name_val_sep = '\n    '
-                section.style.val_sep = '\n    '
+                section.style.name_val_sep = NEWLINE_PLUS_4
+                section.style.val_sep = NEWLINE_PLUS_4
             cmd.changed = True
 
 
@@ -248,10 +279,10 @@ def prettify_installs(package):
         zeroed = False
         for section in cmd.sections[1:]:
             if len(section.values) == 0:
-                section.style.prename = '\n        '
+                section.style.prename = NEWLINE_PLUS_8
                 zeroed = True
             elif not zeroed:
-                section.style.prename = '\n        '
+                section.style.prename = NEWLINE_PLUS_8
             else:
                 section.style.prename = ''
 
@@ -303,44 +334,31 @@ def remove_empty_cmake_lines(package):
 
 
 def get_cmake_clusters(cmake):
+    anchors = cmake.get_ordered_build_targets()
     clusters = []
     current = []
-    anchors = []
     for content in cmake.contents:
         current.append(content)
         if type(content) == str:
             continue
-
-        index = None
-        key = None
-        if content.__class__ == CommandGroup:
-            enforce_cmake_ordering_helper(content.sub)
-            index = get_ordering_index('group')
-            sections = content.initial_tag.get_real_sections()
-            if len(sections) > 0:
-                key = sections[0].name
-        else:  # Command
-            index = get_ordering_index(content.command_name)
-            if content.command_name in BUILD_TARGET_COMMANDS:
-                token = content.first_token()
-                if token not in anchors:
-                    anchors.append(token)
-                key = anchors.index(token)
-        clusters.append(((index, key), current))
+        key = get_sort_key(content, anchors)
+        clusters.append((key, current))
         current = []
     if len(current) > 0:
-        clusters.append(((get_ordering_index(None), None), current))
+        clusters.append((get_sort_key(None, anchors), current))
 
-    return clusters
+    return sorted(clusters, key=lambda (key, contents): key)
 
 
 def enforce_cmake_ordering_helper(cmake):
     clusters = get_cmake_clusters(cmake)
     cmake.contents = []
-    for a, b in sorted(clusters, key=lambda x: x[0]):
-        cmake.contents += b
+    for key, contents in clusters:
+        cmake.contents += contents
 
 
 @roscompile
 def enforce_cmake_ordering(package):
     enforce_cmake_ordering_helper(package.cmake)
+    for group in package.cmake.content_map['group']:
+        enforce_cmake_ordering_helper(group.sub)
