@@ -1,3 +1,28 @@
+## roscompile (lunar) - 1.0.1-0
+
+The packages in the `roscompile` repository were released into the `lunar` distro by running `/usr/bin/bloom-release roscompile -r lunar -y` on `Wed, 29 Aug 2018 15:18:37 -0000`
+
+These packages were released:
+- `ros_introspection`
+- `roscompile`
+
+Version of package(s) in repository `roscompile`:
+
+- upstream repository: https://github.com/DLu/roscompile.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `1.0.1-0`
+
+Versions of tools used:
+
+- bloom version: `0.6.6`
+- catkin_pkg version: `0.4.8`
+- rosdep version: `0.12.2`
+- rosdistro version: `0.6.9`
+- vcstools version: `0.1.40`
+
+
 ## roscompile (kinetic) - 1.0.1-0
 
 The packages in the `roscompile` repository were released into the `kinetic` distro by running `/usr/bin/bloom-release roscompile -r kinetic -y` on `Wed, 29 Aug 2018 15:15:08 -0000`
