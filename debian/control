@@ -1,0 +1,12 @@
+Source: ros-lunar-roscompile
+Section: misc
+Priority: extra
+Maintainer: David V. Lu!! <davidvlu@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-lunar-catkin, ros-lunar-geometry-msgs, ros-lunar-pluginlib, ros-lunar-ros-introspection, ros-lunar-roslint, ros-lunar-tf
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-lunar-roscompile
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lunar-catkin, ros-lunar-ros-introspection
+Description: The roscompile package
