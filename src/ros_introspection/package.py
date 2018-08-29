@@ -1,4 +1,3 @@
-import os.path
 import collections
 from package_structure import get_package_structure
 from package_xml import PackageXML
@@ -13,8 +12,8 @@ from plugin_xml import PluginXML
 class Package:
     def __init__(self, root):
         self.root = root
-        self.name = os.path.split(os.path.abspath(root))[-1]
         self.manifest = PackageXML(self.root + '/package.xml')
+        self.name = self.manifest.name
         self.cmake = parse_file(self.root + '/CMakeLists.txt')
 
         package_structure = get_package_structure(root)
@@ -59,6 +58,7 @@ class Package:
         for launch in self.launches:
             if not launch.test:
                 continue
+            packages.add('rostest')
             packages.update(launch.get_dependencies())
         if self.name in packages:
             packages.remove(self.name)
@@ -82,6 +82,10 @@ class Package:
             plugin_config.write()
         if self.setup_py:
             self.setup_py.write()
+        for gen in self.get_all_generators():
+            gen.write()
+        for src in self.source_code.sources.values():
+            src.write()
 
     def __repr__(self):
         s = '== {} ========\n'.format(self.name)
