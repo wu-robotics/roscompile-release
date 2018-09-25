@@ -1,3 +1,28 @@
+## roscompile (indigo) - 1.0.2-0
+
+The packages in the `roscompile` repository were released into the `indigo` distro by running `scripts/bloom-release roscompile --ros-distro indigo` on `Tue, 25 Sep 2018 19:19:47 -0000`
+
+These packages were released:
+- `ros_introspection`
+- `roscompile`
+
+Version of package(s) in repository `roscompile`:
+
+- upstream repository: https://github.com/DLu/roscompile.git
+- release repository: https://github.com/wu-robotics/roscompile-release.git
+- rosdistro version: `1.0.1-0`
+- old version: `1.0.1-0`
+- new version: `1.0.2-0`
+
+Versions of tools used:
+
+- bloom version: `0.6.1.post3`
+- catkin_pkg version: `0.4.8`
+- rosdep version: `0.12.2`
+- rosdistro version: `0.6.9`
+- vcstools version: `0.1.40`
+
+
 ## roscompile (melodic) - 1.0.1-0
 
 The packages in the `roscompile` repository were released into the `melodic` distro by running `/usr/bin/bloom-release roscompile -r melodic -y` on `Wed, 29 Aug 2018 15:24:37 -0000`
