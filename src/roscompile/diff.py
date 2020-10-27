@@ -53,7 +53,7 @@ def print_diff(filename, left_folder=None, right_folder=None):
     print(''.join(color_diff(diff)))
 
 
-def preview_changes(package, fn_name, fne):
+def preview_changes(package, fn_name, fne, use_package_name=False):
     try:
         temp_dir = tempfile.mkdtemp()
         new_package_root = os.path.join(temp_dir, package.name)
@@ -65,7 +65,10 @@ def preview_changes(package, fn_name, fne):
         if len(the_diff) == 0:
             return False
 
-        print color_header(fn_name)
+        if use_package_name:
+            print(color_header(fn_name + ' (' + package.name + ')'))
+        else:
+            print(color_header(fn_name))
 
         for filename in the_diff.get('diff', []):
             print_diff(filename, package.root, new_package_root)
@@ -78,3 +81,12 @@ def preview_changes(package, fn_name, fne):
         shutil.copytree(package.root, new_package_root)
         shutil.rmtree(temp_dir)
     return True
+
+def prepare_diff_lines(string_a, string_b):
+    a_lines = string_a.split('\n')
+    b_lines = string_b.split('\n')
+    while len(a_lines) < len(b_lines):
+        a_lines.append(None)
+    while len(b_lines) < len(a_lines):
+        b_lines.append(None)
+    return zip(a_lines, b_lines)
