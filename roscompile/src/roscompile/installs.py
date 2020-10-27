@@ -1,8 +1,9 @@
 import os
 import fnmatch
 import collections
-from ros_introspection.cmake import Command
-from util import roscompile
+from ros_introspection.cmake import Command, SectionStyle
+from .cmake import NEWLINE_PLUS_8
+from .util import roscompile
 
 FILES_TO_NOT_INSTALL = ['CHANGELOG.rst', 'README.md', '.travis.yml', 'bitbucket-pipelines.yml']
 
@@ -20,7 +21,7 @@ INSTALL_CONFIGS = {
 
 def get_install_type(destination):
     """ For a given catkin destination, return the matching install type """
-    for name, (kw, destination_map) in INSTALL_CONFIGS.iteritems():
+    for name, (kw, destination_map) in INSTALL_CONFIGS.items():
         if destination in destination_map:
             return name
 
@@ -72,6 +73,7 @@ def matches_patterns(item, patterns):
         if fnmatch.fnmatch(item, pattern):
             return True
 
+
 def check_complex_section(cmd, key, value):
     """ This finds the appopriate section of the command (with a possibly multiword key, see get_multiword_section)
         and ensures the given value is in it. If the appopriate section is not found, it adds it. """
@@ -87,14 +89,14 @@ def check_complex_section(cmd, key, value):
             section.add(value)
             cmd.changed = True
     else:
-        cmd.add_section(key, [value])
+        cmd.add_section(key, [value], SectionStyle(NEWLINE_PLUS_8))
 
 
 def install_sections(cmd, destination_map, subfolder=''):
     """ For a given command and destination_map, ensure that the command has all
         the appropriate CMake sections with the matching catkin destinations.
         If the subfolder is defined, the subfolder is appended to the catkin destination."""
-    for destination, section_names in destination_map.iteritems():
+    for destination, section_names in destination_map.items():
         for section_name in section_names:
             if len(subfolder) > 0:
                 destination = os.path.join(destination, subfolder)
@@ -103,7 +105,7 @@ def install_sections(cmd, destination_map, subfolder=''):
 
 def remove_install_section(cmd, destination_map):
     empty_sections_to_remove = {}
-    for destination, section_names in destination_map.iteritems():
+    for destination, section_names in destination_map.items():
         for section_name in section_names:
             parts = section_name.split()
             if len(parts) == 2:
@@ -146,6 +148,7 @@ def install_section_check(cmake, items, install_type, directory=False, subfolder
         return
 
     cmd = None
+    items = [os.path.join(subfolder, item) for item in items]
     for cmd in cmds:
         install_sections(cmd, destination_map, subfolder)
         section = cmd.get_section(section_name)
@@ -169,16 +172,16 @@ def install_section_check(cmake, items, install_type, directory=False, subfolder
     if len(items) == 0:
         return
 
-    print '\tInstalling', ', '.join(items)
+    print('\tInstalling %s' % ', '.join(items))
     if cmd is None:
         cmd = Command('install')
         cmd.add_section(section_name, items)
         cmake.add_command(cmd)
         install_sections(cmd, destination_map, subfolder)
     elif section:
-        section = cmd.get_section(section_name)
+        # section = cmd.get_section(section_name)
         section.values += items
-        section.changed = True
+        cmd.changed = True
 
 
 @roscompile
@@ -199,5 +202,24 @@ def update_misc_installs(package):
         path, base = os.path.split(rel_path)
         extra_files_by_folder[path].append(base)
 
-    for folder, files in extra_files_by_folder.iteritems():
+    for folder, files in sorted(extra_files_by_folder.items()):
         install_section_check(package.cmake, files, 'misc', subfolder=folder)
+
+
+@roscompile
+def fix_double_directory_installs(package):
+    for cmd in package.cmake.content_map['install']:
+        dir_section = cmd.get_section('DIRECTORY')
+        dest_sections = cmd.get_sections('DESTINATION')
+
+        if not dir_section or not dest_sections:
+            continue
+        directory = dir_section.values[0]
+        final_slash = directory[-1] == '/'
+
+        for section in dest_sections:
+            destination = section.values[0]
+            if not final_slash and destination.endswith(directory):
+                # Remove double directory and final slash
+                section.values[0] = destination[:-len(directory) - 1]
+                cmd.changed = True
