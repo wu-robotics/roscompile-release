@@ -1,14 +1,15 @@
 import re
 import os
-from ros_introspection.resource_list import is_package, get_python_dependency
+from .resource_list import is_package, get_python_dependency
 
 PKG = '([^\.;]+)(\.?[^;]*)?'
 PYTHON1 = '^import ' + PKG
 PYTHON2 = 'from ' + PKG + ' import .*'
-CPLUS = re.compile('#include\s*[<\\"]([^/]*)/?([^/]*)[>\\"]')
+CPLUS = re.compile('#include\s*[<\\"]([^/]*)/?([^/]*)[>\\"]')          # Zero or one slash
+CPLUS2 = re.compile('#include\s*[<\\"]([^/]*)/([^/]*)/([^/]*)[>\\"]')  # Two slashes
 ROSCPP = re.compile('#include\s*<ros/ros.h>')
 
-EXPRESSIONS = [re.compile(PYTHON1), re.compile(PYTHON2), CPLUS]
+EXPRESSIONS = [re.compile(PYTHON1), re.compile(PYTHON2), CPLUS, CPLUS2]
 
 
 def is_python_hashbang_line(s):
@@ -22,7 +23,7 @@ class SourceCodeFile:
         self.tags = set()
         self.changed_contents = None
 
-        self.lines = map(str.strip, self.get_contents().split('\n'))
+        self.lines = list(map(str.strip, self.get_contents().split('\n')))
         if '.py' in self.file_path or (len(self.lines) > 0 and is_python_hashbang_line(self.lines[0])):
             self.language = 'python'
         else:
@@ -40,6 +41,13 @@ class SourceCodeFile:
     def replace_contents(self, contents):
         self.changed_contents = contents
         self.lines = map(unicode.strip, unicode(contents).split('\n'))
+
+    def search_for_patterns(self, patterns):
+        matches = []
+        contents = self.get_contents()
+        for pattern in patterns:
+            matches += pattern.findall(contents)
+        return matches
 
     def search_lines_for_patterns(self, patterns):
         matches = []

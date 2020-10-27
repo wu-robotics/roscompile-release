@@ -14,7 +14,7 @@ PYTHON_DEPS = {}
 def maybe_download_python_deps():
     global PYTHON_DEPS
     if os.path.exists(PY_DEP_FILENAME):
-        PYTHON_DEPS = yaml.load(open(PY_DEP_FILENAME))
+        PYTHON_DEPS = yaml.safe_load(open(PY_DEP_FILENAME))
         if 'last_download' in PYTHON_DEPS:
             now = datetime.datetime.now()
             if now - PYTHON_DEPS['last_download'] < datetime.timedelta(days=3):
@@ -23,10 +23,10 @@ def maybe_download_python_deps():
     try:
         ff = requests.get('https://raw.githubusercontent.com/ros/rosdistro/master/rosdep/python.yaml').text
     except requests.exceptions.ConnectionError:
-        print 'Cannot retrieve latest python dependencies'
+        print('Cannot retrieve latest python dependencies')
         return
 
-    PYTHON_DEPS = yaml.load(ff)
+    PYTHON_DEPS = yaml.safe_load(ff)
     PYTHON_DEPS['last_download'] = datetime.datetime.now()
 
     if not os.path.exists(DOT_ROS_FOLDER):

@@ -22,7 +22,7 @@ def get_ordering_index(name, whiny=True):
         elif name == o:
             return i
     if name and whiny:
-        print '\tUnsure of ordering for', name
+        print('\tUnsure of ordering for ' + name)
     return len(ORDERING)
 
 
@@ -49,6 +49,7 @@ class PackageXML:
         self._name = None
         self._format = None
         self._std_tab = None
+        self.changed = False
 
     @property
     def name(self):
@@ -83,7 +84,7 @@ class PackageXML:
         if len(tab_ct) == 0:
             self._std_tab = 4
         else:
-            self._std_tab = max(tab_ct.iteritems(), key=operator.itemgetter(1))[0]
+            self._std_tab = max(tab_ct.items(), key=operator.itemgetter(1))[0]
         return self._std_tab
 
     def get_packages_by_tag(self, tag):
@@ -143,54 +144,106 @@ class PackageXML:
             tags[current].append((current_start, current_last))
         return dict(tags)
 
-    def get_insertion_index(self, tag):
+    def get_insertion_index(self, tag, tag_value=None):
         """ Returns the index where to insert a new element with the given tag type.
-            If there are already elements of that type, then insert after the last matching element.
+            If there are already elements of that type, then either insert after the last matching element,
+            or if the list is alphabetized, insert it in the correct place alphabetically using the tag_value.
             Otherwise, look at the existing elements, and find ones that are supposed to come the closest
             before the given tag, and insert after them. If none found, add at the end.
         """
         indexes = self.get_child_indexes()
+        # If there are elements of this type already
         if tag in indexes:
+            if len(indexes[tag]) == 1 and tag in DEPEND_ORDERING:
+                start, end = indexes[tag][0]
+                tag_values = []
+                my_index = start
+                for i in range(start, end + 1):
+                    child = self.root.childNodes[i]
+                    if child.nodeType == child.TEXT_NODE:
+                        continue
+                    value = child.firstChild.data
+                    tag_values.append(value)
+                    if tag_value >= value:
+                        my_index = i
+
+                # If already sorted, and first_value is defined (meaning there are existing tags)
+                if tag_values and sorted(tag_values) == tag_values:
+                    # If it should go before the current first tag, we XXX
+                    if tag_value <= tag_values[0]:
+                        return my_index - 1
+
+                    # If it should go before some existing tag
+                    if tag_value <= tag_values[-1]:
+                        return my_index
+
+            # If all else fails, we insert the tag after the last matching tag
             return indexes[tag][-1][1]  # last match, end index
 
-        max_index = get_ordering_index(tag, whiny=False)
-        best_tag = None
-        best_index = None
-        for tag in indexes:
-            ni = get_ordering_index(tag, whiny=False)
-            if ni >= max_index:
-                # This tag should appear after our tag
-                continue
-
-            if best_tag is None or ni > best_index or indexes[tag][-1] > indexes[best_tag][-1]:
-                best_tag = tag
-                best_index = ni
-
-        if best_tag is None:
-            return len(self.root.childNodes)
+        # If no elements match this type, then find the right place to insert
         else:
-            return indexes[best_tag][-1][1]
+            max_index = get_ordering_index(tag, whiny=False)
+            best_tag = None
+            best_index = None
+            for tag in indexes:
+                ni = get_ordering_index(tag, whiny=False)
+                if ni >= max_index:
+                    # This tag should appear after our tag
+                    continue
+
+                if best_tag is None or ni > best_index or indexes[tag][-1] > indexes[best_tag][-1]:
+                    best_tag = tag
+                    best_index = ni
+
+            if best_tag is None:
+                return len(self.root.childNodes)
+            else:
+                return indexes[best_tag][-1][1]
+
+    def insert_new_tag(self, tag):
+        if tag.tagName in DEPEND_ORDERING:
+            value = tag.firstChild.data
+        else:
+            value = None
+
+        index = self.get_insertion_index(tag.tagName, value)
+        before = self.root.childNodes[:index + 1]
+        after = self.root.childNodes[index + 1:]
+
+        new_tab_element = self.get_tab_element()
+
+        # if the tag immediately before where we're going to insert is a text node,
+        # then insert the new element and then the tab
+        if before and before[-1].nodeType == before[-1].TEXT_NODE:
+            new_bits = [tag, new_tab_element]
+        else:
+            # Otherwise (i.e. most cases) insert the tab then the element
+            new_bits = [new_tab_element, tag]
+
+        self.root.childNodes = before + new_bits + after
+        self.changed = True
 
     def insert_new_tags(self, tags):
-        # Assumes all the tags have the same type
-        if len(tags) == 0:
-            return
-
-        index = self.get_insertion_index(tags[0].tagName)
-        tags_plus_indents = []
         for tag in tags:
-            tags_plus_indents.append(self.get_tab_element())
-            tags_plus_indents.append(tag)
-        self.root.childNodes = self.root.childNodes[:index + 1] + tags_plus_indents + self.root.childNodes[index + 1:]
+            self.insert_new_tag(tag)
+
+    def insert_new_tag_inside_another(self, parent, tag, depth=2):
+        all_elements = []
+        all_elements.append(self.get_tab_element(depth))
+        all_elements.append(tag)
+
+        if len(parent.childNodes) == 0:
+            parent.childNodes = all_elements + [self.get_tab_element()]
+        else:
+            parent.childNodes = parent.childNodes[:-1] + all_elements + parent.childNodes[-1:]
+        self.changed = True
 
     def insert_new_packages(self, tag, values):
-        elements_to_insert = []
         for pkg in sorted(values):
-            print '\tInserting %s: %s' % (tag, pkg)
+            print('\tInserting %s: %s' % (tag, pkg))
             node = self.tree.createElement(tag)
             node.appendChild(self.tree.createTextNode(pkg))
-            elements_to_insert.append(node)
-        self.insert_new_tags(elements_to_insert)
+            self.insert_new_tag(node)
 
     def add_packages(self, build_depends, run_depends, test_depends=None, prefer_depend_tag=True):
         if self.format == 1:
@@ -203,7 +256,14 @@ class PackageXML:
             self.insert_new_packages('build_depend', build_depends)
             self.insert_new_packages('run_depend', run_depends)
         elif prefer_depend_tag:
-            self.insert_new_packages('depend', build_depends.union(run_depends))
+            depend_tags = build_depends.union(run_depends)
+
+            # Remove tags that overlap with new depends
+            self.remove_dependencies('build_depend', existing_build.intersection(depend_tags))
+            self.remove_dependencies('exec_depend', existing_run.intersection(depend_tags))
+
+            # Insert depends
+            self.insert_new_packages('depend', depend_tags)
         else:
             both = build_depends.intersection(run_depends)
             self.insert_new_packages('depend', both)
@@ -225,13 +285,14 @@ class PackageXML:
             if previous.nodeType == previous.TEXT_NODE and INDENT_PATTERN.match(previous.nodeValue):
                 parent.removeChild(previous)
         parent.removeChild(element)
+        self.changed = True
 
     def remove_dependencies(self, name, pkgs, quiet=False):
         for el in self.root.getElementsByTagName(name):
             pkg = el.childNodes[0].nodeValue
             if pkg in pkgs:
                 if not quiet:
-                    print '\tRemoving %s %s' % (name, pkg)
+                    print('\tRemoving %s %s' % (name, pkg))
                 self.remove_element(el)
 
     def get_elements_by_tags(self, tags):
@@ -256,7 +317,8 @@ class PackageXML:
                 el.childNodes[0].nodeValue = target_name
                 if target_email:
                     el.setAttribute('email', target_email)
-                print '\tReplacing %s %s/%s with %s/%s' % (el.nodeName, name, email, target_name, target_email)
+                print('\tReplacing %s %s/%s with %s/%s' % (el.nodeName, name, email, target_name, target_email))
+                self.changed = True
 
     def get_license_element(self):
         els = self.root.getElementsByTagName('license')
@@ -270,7 +332,9 @@ class PackageXML:
 
     def set_license(self, license):
         el = self.get_license_element()
-        el.childNodes[0].nodeValue = license
+        if license != el.childNodes[0].nodeValue:
+            el.childNodes[0].nodeValue = license
+            self.changed = True
 
     def is_metapackage(self):
         for node in self.root.getElementsByTagName('export'):
@@ -299,7 +363,7 @@ class PackageXML:
         export_tags = self.root.getElementsByTagName('export')
         if len(export_tags) == 0:
             export_tag = self.tree.createElement('export')
-            self.insert_new_tags([export_tag])
+            self.insert_new_tag(export_tag)
             export_tags = [export_tag]
 
         attr = '${prefix}/' + xml_path
@@ -314,21 +378,19 @@ class PackageXML:
         ex_el = export_tags[0]
         pe = self.tree.createElement(pkg_name)
         pe.setAttribute('plugin', attr)
-        ex_el.appendChild(pe)
+        self.insert_new_tag_inside_another(ex_el, pe)
         return ex_el
 
     def write(self, new_fn=None):
         if new_fn is None:
             new_fn = self.fn
 
-        s = self.tree.toxml(self.tree.encoding)
-        index = get_package_tag_index(s)
-        s = self.header + s[index:]
-
-        old_s = open(new_fn, 'r').read().decode('UTF-8')
-        if old_s.strip() == s:
+        if new_fn == self.fn and not self.changed:
             return
 
-        with open(new_fn, 'w') as f:
+        s = self.tree.toxml(self.tree.encoding)
+        index = get_package_tag_index(s)
+        s = self.header + s[index:] + '\n'
+
+        with open(new_fn, 'wb') as f:
             f.write(s.encode('UTF-8'))
-            f.write('\n')
