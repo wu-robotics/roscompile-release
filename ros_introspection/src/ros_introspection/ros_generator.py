@@ -1,8 +1,10 @@
 import os.path
 import re
 
-AT_LEAST_THREE_DASHES = re.compile('^\-{3,}$')
-FIELD_LINE = re.compile('([\w_/]+)(\[\d*\])?\s+([\w_]+)(=.*)?(\s*\#.*)?$', re.DOTALL)
+AT_LEAST_THREE_DASHES = re.compile('^\-{3,}\r?$')
+FIELD_LINE = re.compile('([\w_/]+)(\[\d*\])?\s+([\w_]+)\s*(=.*)?(\s*\#.*)?$', re.DOTALL)
+PRIMITIVES = ['bool', 'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64',
+              'float32', 'float64', 'string', 'time', 'duration']
 
 
 class GeneratorField:
@@ -30,7 +32,8 @@ class GeneratorSection:
         self.fields = []
 
     def add_line(self, line):
-        if line[0] == '#' or line == '\n':
+        stripped = line.strip()
+        if not stripped or stripped[0] == '#':
             self.contents.append(line)
             return
         m = FIELD_LINE.match(line)
@@ -44,8 +47,7 @@ class GeneratorSection:
             else:
                 self.contents.append('\n')
         else:
-            print repr(line)
-            exit(0)
+            raise Exception('Unable to parse generator line: ' + repr(line))
 
     def __repr__(self):
         return ''.join(map(str, self.contents))
