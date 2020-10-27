@@ -1,6 +1,6 @@
 import re
 import sys
-from cmake import CMake, Command, Section, SectionStyle, CommandGroup
+from .cmake import CMake, Command, Section, SectionStyle, CommandGroup
 
 ALL_CAPS = re.compile('^[A-Z_]+$')
 ALL_WHITESPACE = ['whitespace', 'newline']
@@ -76,7 +76,7 @@ class AwesomeParser:
 
         if debug:
             for typ, token in self.tokens:
-                print '[%s]%s' % (typ, repr(token))
+                print('[%s]%s' % (typ, repr(token)))
 
         self.contents = []
         while len(self.tokens) > 0:
@@ -97,7 +97,7 @@ class AwesomeParser:
 
         if debug:
             for chunk in self.contents:
-                print '[%s]' % chunk
+                print('[%s]' % chunk)
 
     def parse_command(self):
         command_name = self.match()
@@ -108,6 +108,7 @@ class AwesomeParser:
             cmd.pre_paren += s
             original += s
         original += self.match('left paren')
+        paren_depth = 1
 
         while len(self.tokens) > 0:
             typ = self.next_real_type()
@@ -119,10 +120,12 @@ class AwesomeParser:
                 typ, tok_contents = self.tokens.pop(0)
                 original += tok_contents
                 if typ == 'right paren':
-                    cmd.original = original
-                    return cmd
+                    paren_depth -= 1
+                    if paren_depth == 0:
+                        cmd.original = original
+                        return cmd
                 elif typ == 'left paren':
-                    pass
+                    paren_depth += 1
                 else:
                     cmd.sections.append(tok_contents)
         raise CMakeParseError('File ended while processing command "%s"' % (command_name))
@@ -150,7 +153,7 @@ class AwesomeParser:
 
         delims = set()
         current = ''
-        while self.next_real_type() not in ['right paren', 'caps']:
+        while self.next_real_type() not in ['left paren', 'right paren', 'caps']:
             typ = self.get_type()
             if typ in ALL_WHITESPACE:
                 token = self.match()
@@ -170,22 +173,22 @@ class AwesomeParser:
                 style.val_sep = list(delims)[0]
             else:
                 # TODO: Smarter multi delim parsing
-                # print delims
+                # print(delims)
                 style.val_sep = list(delims)[0]
 
-        # print cat, tokens, style
+        # print(cat, tokens, style)
         return Section(cat, tokens, style), original
 
     def match(self, typ=None):
         if typ is None or self.get_type() == typ:
             typ, tok = self.tokens.pop(0)
-            # print '[%s]%s'%(typ, repr(tok))
+            # print('[%s]%s'%(typ, repr(tok)))
             return tok
         else:
-            sys.stderr.write('Expected type "%s" but got "%s"\n' % (typ, self.get_type()))
+            sys.stderr.write('Token Dump:\n')
             for a in self.tokens:
                 sys.stderr.write(str(a) + '\n')
-            exit(-1)
+            raise CMakeParseError('Expected type "%s" but got "%s"' % (typ, self.get_type()))
 
     def get_type(self):
         if len(self.tokens) > 0:
