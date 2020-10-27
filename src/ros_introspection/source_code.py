@@ -1,12 +1,12 @@
 import os.path
-from source_code_file import SourceCodeFile
+from .source_code_file import SourceCodeFile
 
 
 class SourceCode:
     def __init__(self, filenames, pkg_name):
         self.pkg_name = pkg_name
         self.sources = {}
-        for rel_fn, file_path in filenames.iteritems():
+        for rel_fn, file_path in filenames.items():
             self.sources[rel_fn] = SourceCodeFile(rel_fn, file_path)
 
     def has_header_files(self):
@@ -24,10 +24,12 @@ class SourceCode:
                            ('executable', cmake.get_executable_source()),
                            ('test', cmake.get_test_source())]:
             for fn in files:
+                if fn and fn[0] == '$':
+                    continue
                 if fn in self.sources:
                     self.sources[fn].tags.add(tag)
                 else:
-                    print '    File %s found in CMake not found in folder!' % fn
+                    print('    File %s found in CMake not found in folder!' % fn)
 
     def get_build_dependencies(self):
         packages = set()
@@ -57,16 +59,19 @@ class SourceCode:
             packages.remove(self.pkg_name)
         return packages
 
-    def search_for_patterns(self, patterns):
+    def search_for_patterns(self, patterns, per_line=True):
         files = {}
         for source in self.sources.values():
-            matches = source.search_lines_for_patterns(patterns)
+            if per_line:
+                matches = source.search_lines_for_patterns(patterns)
+            else:
+                matches = source.search_for_patterns(patterns)
             if len(matches) != 0:
                 files[source.rel_fn] = matches
         return files
 
-    def search_for_pattern(self, pattern):
-        return self.search_for_patterns([pattern])
+    def search_for_pattern(self, pattern, per_line=True):
+        return self.search_for_patterns([pattern], per_line)
 
     def __repr__(self):
         return '\n'.join(map(str, sorted(self.sources.values())))
