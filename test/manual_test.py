@@ -3,7 +3,9 @@ import inspect
 from zipfile_interface import get_test_cases
 from ros_introspection.package import Package
 from roscompile import get_functions
+from roscompile.diff import prepare_diff_lines
 import os.path
+import click
 
 
 def compare(pkg_in, pkg_out, debug=True):
@@ -13,27 +15,24 @@ def compare(pkg_in, pkg_out, debug=True):
 
     for fn in missed_deletes:
         if debug:
-            print 'Should have deleted %s' % fn
+            click.secho('Should have deleted %s' % fn, fg='yellow')
         success = False
     for fn in missed_generations:
         if debug:
-            print 'Failed to generate %s' % fn
+            click.secho('Failed to generate %s' % fn, fg='yellow')
         success = False
     for filename in matches:
-        generated_contents = pkg_in.get_contents(filename)
-        canonical_contents = pkg_out.get_contents(filename)
+        generated_contents = pkg_in.get_contents(filename).replace('\r\n', '\n')
+        canonical_contents = pkg_out.get_contents(filename).replace('\r\n', '\n')
         if generated_contents.strip() == canonical_contents.strip():
             continue
         success = False
         if debug:
-            A = generated_contents.split('\n')
-            B = canonical_contents.split('\n')
-            while len(A) < len(B):
-                A.append(None)
-            while len(B) < len(A):
-                B.append(None)
-            for a, b in zip(A, B):
-                print a == b, repr(a), repr(b)
+            for gen_line, can_line in prepare_diff_lines(generated_contents, canonical_contents):
+                if gen_line == can_line:
+                    click.echo(repr(gen_line))
+                else:
+                    click.secho(repr(gen_line) + ' should be ' + repr(can_line), fg='yellow')
     return success
 
 
@@ -54,13 +53,15 @@ if __name__ == '__main__':
 
         with cases[test_config['in']] as pkg_in:
             try:
+                total += 1
                 if test_config['in'] == test_config['out']:
                     pkg_out = pkg_in.copy()
                 else:
                     pkg_out = cases[test_config['out']]
 
-                print '{:25} >> {:25} {}'.format(test_config['in'], test_config['out'],
-                                                 ','.join(test_config['functions']))
+                click.secho('{:25} >> {:25} {}'.format(test_config['in'], test_config['out'],
+                                                       ','.join(test_config['functions'])),
+                            bold=True, fg='white')
                 root = pkg_in.root
                 if 'subpkg' in test_config:
                     root = os.path.join(root, test_config['subpkg'])
@@ -73,17 +74,18 @@ if __name__ == '__main__':
                     else:
                         fne(pp)
                 pp.write()
-                total += 1
                 if compare(pkg_in, pkg_out):
-                    print '  SUCCESS'
+                    click.secho('  SUCCESS', fg='green')
                     successes += 1
                 else:
-                    print '  FAIL'
+                    click.secho('  FAIL', fg='red')
                     if args.fail_once:
                         break
             except Exception as e:
-                print '  EXCEPTION', e.message
+                click.secho('  EXCEPTION ' + str(e), fg='red')
                 if args.last:
                     raise
+                if args.fail_once:
+                    break
     if not args.last:
-        print '{}/{}'.format(successes, total)
+        click.secho('{}/{}'.format(successes, total), bold=True, fg='white')

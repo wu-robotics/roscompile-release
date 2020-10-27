@@ -1,7 +1,7 @@
-from ros_introspection.cmake import Command, CommandGroup, get_sort_key
+from ros_introspection.cmake import Command, CommandGroup
 from ros_introspection.source_code_file import CPLUS
 from ros_introspection.resource_list import is_message, is_service
-from util import get_ignore_data, roscompile
+from .util import get_ignore_data, roscompile, get_config
 
 SHOULD_ALPHABETIZE = ['COMPONENTS', 'DEPENDENCIES', 'FILES', 'CATKIN_DEPENDS']
 NEWLINE_PLUS_4 = '\n    '
@@ -20,13 +20,17 @@ def check_cmake_dependencies_helper(cmake, dependencies, check_catkin_pkg=True):
     for cmd in cmake.content_map['find_package']:
         tokens = cmd.get_tokens()
         if tokens and tokens[0] == 'catkin' and cmd.get_section('REQUIRED'):
+            req_sec = cmd.get_section('REQUIRED')
             section = cmd.get_section('COMPONENTS')
+            if section is None and req_sec.values:
+                section = req_sec  # Allow packages to be listed without COMPONENTS keyword
             if section is None:
                 cmd.add_section('COMPONENTS', sorted(dependencies))
             else:
-                needed_items = dependencies - set(section.values)
-                if len(needed_items) > 0:
-                    section.values += list(sorted(needed_items))
+                existing = cmake.resolve_variables(section.values)
+                needed_items = dependencies - set(existing)
+                if needed_items:
+                    section.add_values(needed_items)
                     cmd.changed = True
     if check_catkin_pkg:
         cmake.section_check(dependencies, 'catkin_package', 'CATKIN_DEPENDS')
@@ -40,9 +44,17 @@ def check_cmake_dependencies(package):
 
 
 def get_matching_add_depends(cmake, search_target):
+    valid_targets = set([search_target])
+    alt_target = cmake.resolve_variables(search_target)
+    if alt_target != search_target:
+        valid_targets.add(alt_target)
+
     for cmd in cmake.content_map['add_dependencies']:
         target = cmd.first_token()
-        if target == search_target:
+        if target in valid_targets:
+            return cmd
+        resolved_target = cmake.resolve_variables(target)
+        if resolved_target in valid_targets:
             return cmd
 
 
@@ -55,6 +67,8 @@ def match_generator_name(package, name):
 def get_msg_dependencies_from_source(package, sources):
     deps = set()
     for rel_fn in sources:
+        if rel_fn not in package.source_code.sources:
+            continue
         src = package.source_code.sources[rel_fn]
         for pkg, name in src.search_lines_for_pattern(CPLUS):
             if len(name) == 0 or name[-2:] != '.h':
@@ -72,7 +86,7 @@ def get_msg_dependencies_from_source(package, sources):
 @roscompile
 def check_exported_dependencies(package):
     targets = package.cmake.get_target_build_rules()
-    for target, sources in targets.iteritems():
+    for target, sources in targets.items():
         deps = get_msg_dependencies_from_source(package, sources)
         if len(deps) == 0:
             continue
@@ -123,7 +137,7 @@ def remove_pattern(section, pattern):
 def remove_old_style_cpp_dependencies(package):
     global_changed = False
     targets = package.cmake.get_target_build_rules()
-    for target, sources in targets.iteritems():
+    for target in targets:
         add_deps = get_matching_add_depends(package.cmake, target)
         if add_deps is None or len(add_deps.sections) == 0:
             continue
@@ -147,12 +161,12 @@ def target_catkin_libraries(package):
         tokens = cmd.get_tokens()
         if tokens[0] in targets:
             if CATKIN not in tokens:
-                print '\tAdding %s to target_link_libraries for %s' % (CATKIN, tokens[0])
+                print('\tAdding %s to target_link_libraries for %s' % (CATKIN, tokens[0]))
                 cmd.add_token(CATKIN)
             targets.remove(tokens[0])
             continue
     for target in targets:
-        print '\tAdding target_link_libraries for %s' % target
+        print('\tAdding target_link_libraries for %s' % target)
         cmd = Command('target_link_libraries')
         cmd.add_section('', [target, CATKIN])
         package.cmake.add_command(cmd)
@@ -191,11 +205,11 @@ def check_includes(package):
     has_includes = False
     if package.source_code.has_header_files():
         package.cmake.section_check(['include'], 'catkin_package', 'INCLUDE_DIRS')
-        package.cmake.section_check(['include'], 'include_directories')
+        package.cmake.section_check(['include'], 'include_directories', alpha_order=False)
         has_includes = True
 
     if len(package.source_code.get_source_by_language('c++')) > 0:
-        package.cmake.section_check(['${catkin_INCLUDE_DIRS}'], 'include_directories')
+        package.cmake.section_check(['${catkin_INCLUDE_DIRS}'], 'include_directories', alpha_order=False)
         has_includes = True
 
     if not has_includes and 'include_directories' in package.cmake.content_map:
@@ -213,7 +227,10 @@ def alphabetize_sections_helper(cmake):
         if content.__class__ == Command:
             for section in content.get_real_sections():
                 if section.name in SHOULD_ALPHABETIZE:
-                    section.values = sorted(section.values)
+                    sorted_values = list(sorted(section.values))
+                    if sorted_values != section.values:
+                        section.values = sorted_values
+                        content.changed = True
         elif content.__class__ == CommandGroup:
             alphabetize_sections_helper(content.sub)
 
@@ -250,18 +267,6 @@ def prettify_package_lists(package):
 
 
 @roscompile
-def alphabetize_package_lists(package):
-    for cmd_name, section_name in [('find_package', 'COMPONENTS'), ('catkin_package', 'CATKIN_DEPENDS')]:
-        for cmd in package.cmake.content_map[cmd_name]:
-            for section in cmd.get_real_sections():
-                if section.name != section_name:
-                    continue
-                sorted_values = list(sorted(section.values))
-                if sorted_values != section.values:
-                    section.values = sorted_values
-                    cmd.changed = True
-
-@roscompile
 def prettify_msgs_srvs(package):
     for cmd in package.cmake.content_map['add_message_files'] + package.cmake.content_map['add_service_files']:
         for section in cmd.get_real_sections():
@@ -288,7 +293,7 @@ def prettify_installs(package):
 
 
 def remove_empty_strings(a):
-    return filter(lambda x: x != '', a)
+    return list(filter(lambda x: x != '', a))
 
 
 def remove_cmake_command_comments_helper(command, ignorables, replacement=''):
@@ -333,32 +338,9 @@ def remove_empty_cmake_lines(package):
     package.cmake.contents = remove_empty_strings(package.cmake.contents)
 
 
-def get_cmake_clusters(cmake):
-    anchors = cmake.get_ordered_build_targets()
-    clusters = []
-    current = []
-    for content in cmake.contents:
-        current.append(content)
-        if type(content) == str:
-            continue
-        key = get_sort_key(content, anchors)
-        clusters.append((key, current))
-        current = []
-    if len(current) > 0:
-        clusters.append((get_sort_key(None, anchors), current))
-
-    return sorted(clusters, key=lambda (key, contents): key)
-
-
-def enforce_cmake_ordering_helper(cmake):
-    clusters = get_cmake_clusters(cmake)
-    cmake.contents = []
-    for key, contents in clusters:
-        cmake.contents += contents
-
-
 @roscompile
-def enforce_cmake_ordering(package):
-    enforce_cmake_ordering_helper(package.cmake)
-    for group in package.cmake.content_map['group']:
-        enforce_cmake_ordering_helper(group.sub)
+def enforce_cmake_ordering(package, config=None):
+    if config is None:
+        config = get_config()
+    default_style = config.get('cmake_style')
+    package.cmake.enforce_ordering(default_style)
