@@ -1,6 +1,6 @@
 import os
 import collections
-from source_code_file import is_python_hashbang_line
+from .source_code_file import is_python_hashbang_line
 
 KEY = ['package.xml', 'CMakeLists.txt', 'setup.py']
 SRC_EXTS = ['.py', '.cpp', '.h', '.hpp', '.c']
@@ -9,7 +9,10 @@ GENERATORS = ['.msg', '.srv', '.action']
 
 def get_filetype_by_contents(filename, ext):
     with open(filename) as f:
-        first_line = f.readline()
+        try:
+            first_line = f.readline()
+        except UnicodeDecodeError:
+            return
         if is_python_hashbang_line(first_line):
             return 'source'
         elif '<launch' in first_line:
