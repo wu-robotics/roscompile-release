@@ -1,3 +1,28 @@
+## roscompile (noetic) - 1.1.1-1
+
+The packages in the `roscompile` repository were released into the `noetic` distro by running `/usr/bin/bloom-release roscompile -r noetic` on `Thu, 19 Nov 2020 20:33:26 -0000`
+
+These packages were released:
+- `ros_introspection`
+- `roscompile`
+
+Version of package(s) in repository `roscompile`:
+
+- upstream repository: https://github.com/DLu/roscompile.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `1.1.1-1`
+
+Versions of tools used:
+
+- bloom version: `0.10.0`
+- catkin_pkg version: `0.4.23`
+- rosdep version: `0.19.0`
+- rosdistro version: `0.8.3`
+- vcstools version: `0.1.42`
+
+
 ## roscompile (melodic) - 1.1.0-1
 
 The packages in the `roscompile` repository were released into the `melodic` distro by running `/usr/bin/bloom-release roscompile -r melodic -e` on `Thu, 19 Nov 2020 20:18:28 -0000`
