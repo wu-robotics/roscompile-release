@@ -1,0 +1,12 @@
+Source: ros-noetic-roscompile
+Section: misc
+Priority: optional
+Maintainer: David V. Lu!! <davidvlu@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-noetic-catkin, ros-noetic-geometry-msgs, ros-noetic-pluginlib, ros-noetic-pluginlib-tutorials, ros-noetic-ros-introspection, ros-noetic-roslint, ros-noetic-stereo-msgs, ros-noetic-tf
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-noetic-roscompile
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, python3-click, python3-rospkg, python3-yaml, ros-noetic-catkin, ros-noetic-ros-introspection
+Description: The roscompile package
