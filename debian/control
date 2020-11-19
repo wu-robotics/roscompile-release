@@ -1,0 +1,12 @@
+Source: ros-kinetic-roscompile
+Section: misc
+Priority: optional
+Maintainer: David V. Lu!! <davidvlu@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-kinetic-catkin, ros-kinetic-geometry-msgs, ros-kinetic-pluginlib, ros-kinetic-pluginlib-tutorials, ros-kinetic-ros-introspection, ros-kinetic-roslint, ros-kinetic-stereo-msgs, ros-kinetic-tf
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-kinetic-roscompile
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, python-click, python-rospkg, python-yaml, ros-kinetic-catkin, ros-kinetic-ros-introspection
+Description: The roscompile package
