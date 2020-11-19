@@ -2,12 +2,12 @@ import re
 import os
 from .resource_list import is_package, get_python_dependency
 
-PKG = '([^\.;]+)(\.?[^;]*)?'
+PKG = r'([^\.;]+)(\.?[^;]*)?'
 PYTHON1 = '^import ' + PKG
 PYTHON2 = 'from ' + PKG + ' import .*'
-CPLUS = re.compile('#include\s*[<\\"]([^/]*)/?([^/]*)[>\\"]')          # Zero or one slash
-CPLUS2 = re.compile('#include\s*[<\\"]([^/]*)/([^/]*)/([^/]*)[>\\"]')  # Two slashes
-ROSCPP = re.compile('#include\s*<ros/ros.h>')
+CPLUS = re.compile(r'#include\s*[<\\"]([^/]*)/?([^/]*)[>\\"]')          # Zero or one slash
+CPLUS2 = re.compile(r'#include\s*[<\\"]([^/]*)/([^/]*)/([^/]*)[>\\"]')  # Two slashes
+ROSCPP = re.compile(r'#include\s*<ros/ros.h>')
 
 EXPRESSIONS = [re.compile(PYTHON1), re.compile(PYTHON2), CPLUS, CPLUS2]
 
@@ -60,6 +60,35 @@ class SourceCodeFile:
 
     def search_lines_for_pattern(self, pattern):
         return self.search_lines_for_patterns([pattern])
+
+    def modify_with_patterns(self, patterns, verbose):
+        """
+            Given a map of patterns, replace all instances in the source code
+
+            The key in the map (needle) is a regular expression string literal.
+            If there are no groups, then the matching string is replaced with the map value.
+            If there are groups, then the literals of the form $0, $1, etc in the map value are replaced with the groups
+        """
+        s = self.get_contents()
+        changed = False
+        for needle, replacement in patterns.items():
+            pattern = re.compile(needle)
+            m = pattern.search(s)
+            while m:
+                this_replacement = replacement
+                if len(m.groups()) > 0:
+                    for i, chunk in enumerate(m.groups()):
+                        key = '$%d' % i
+                        this_replacement = this_replacement.replace(key, chunk)
+                before, middle, after = s.partition(m.group(0))
+                if verbose:
+                    print('In %s, replacing %s with %s' % (self.rel_fn, middle, this_replacement))
+                s = before + this_replacement + after
+
+                changed = True
+                m = pattern.search(s)
+            if changed:
+                self.replace_contents(s)
 
     def get_import_packages(self):
         pkgs = set()
