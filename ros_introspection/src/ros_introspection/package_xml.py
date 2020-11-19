@@ -13,6 +13,12 @@ INDENT_PATTERN = re.compile('\n *')
 
 PEOPLE_TAGS = ['maintainer', 'author']
 
+FORMAT_3_HEADER = """<?xml version="1.0"?>
+<?xml-model
+  href="http://download.ros.org/schema/package_format3.xsd"
+  schematypens="http://www.w3.org/2001/XMLSchema"?>
+"""
+
 
 def get_ordering_index(name, whiny=True):
     for i, o in enumerate(ORDERING):
@@ -37,6 +43,23 @@ def count_trailing_spaces(s):
     while c < len(s) and s[-c - 1] == ' ':
         c += 1
     return c
+
+
+def replace_package_set(manifest, source_tags, new_tag):
+    """
+       Find the set of packages that are defined in the manifest using all of the tags listed in source_tags.
+       Remove all those elements and replace them with the new_tag.
+    """
+    intersection = None
+    for tag in source_tags:
+        pkgs = set(manifest.get_packages_by_tag(tag))
+        if intersection is None:
+            intersection = pkgs
+        else:
+            intersection = intersection.intersection(pkgs)
+    for tag in source_tags:
+        manifest.remove_dependencies(tag, intersection)
+    manifest.insert_new_packages(new_tag, intersection)
 
 
 class PackageXML:
@@ -357,29 +380,59 @@ class PackageXML:
                     xmls[n.nodeName].append(plugin)
         return xmls
 
-    def add_plugin_export(self, pkg_name, xml_path):
-        """ Adds the plugin configuration if not found. Adds export tag as needed.
-            Returns the export tag it was added to."""
+    def get_export_tag(self):
+        """ Creates it if it doesn't exist. """
         export_tags = self.root.getElementsByTagName('export')
         if len(export_tags) == 0:
             export_tag = self.tree.createElement('export')
             self.insert_new_tag(export_tag)
-            export_tags = [export_tag]
+            return export_tag
+        else:
+            return export_tags[0]
+
+    def add_plugin_export(self, pkg_name, xml_path):
+        """ Adds the plugin configuration if not found. Adds export tag as needed.
+            Returns the export tag it was added to."""
+        ex_tag = self.get_export_tag()
 
         attr = '${prefix}/' + xml_path
-        for ex_tag in export_tags:
-            for tag in ex_tag.childNodes:
-                if tag.nodeName != pkg_name:
-                    continue
-                plugin = tag.attributes.get('plugin')
-                if plugin and plugin.value == attr:
-                    return
+        for tag in ex_tag.childNodes:
+            if tag.nodeName != pkg_name:
+                continue
+            plugin = tag.attributes.get('plugin')
+            if plugin and plugin.value == attr:
+                return
 
-        ex_el = export_tags[0]
         pe = self.tree.createElement(pkg_name)
         pe.setAttribute('plugin', attr)
-        self.insert_new_tag_inside_another(ex_el, pe)
-        return ex_el
+        self.insert_new_tag_inside_another(ex_tag, pe)
+        return ex_tag
+
+    def upgrade(self, new_format=2, quiet=True):
+        if self.format == new_format:
+            if not quiet:
+                print('%s already in format %d!' % (self.name, self.format))
+            return
+
+        if new_format not in [2, 3]:
+            raise RuntimeError('Unknown PackageXML version: ' + repr(new_format))
+
+        if self.format == 1:
+            if not quiet:
+                print('Converting {} from version {} to 2'.format(self.name, self.format))
+            self._format = 2
+            self.root.setAttribute('format', '2')
+            replace_package_set(self, ['build_depend', 'run_depend'], 'depend')
+            replace_package_set(self, ['run_depend'], 'exec_depend')
+
+        if new_format == 3:
+            if not quiet:
+                print('Converting {} from version {} to 3'.format(self.name, self.format))
+            self._format = 3
+            self.root.setAttribute('format', '3')
+            self.header = FORMAT_3_HEADER
+
+        self.changed = True
 
     def write(self, new_fn=None):
         if new_fn is None:
