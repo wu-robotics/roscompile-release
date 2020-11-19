@@ -1,3 +1,28 @@
+## roscompile (melodic) - 1.1.0-1
+
+The packages in the `roscompile` repository were released into the `melodic` distro by running `/usr/bin/bloom-release roscompile -r melodic -e` on `Thu, 19 Nov 2020 20:18:28 -0000`
+
+These packages were released:
+- `ros_introspection`
+- `roscompile`
+
+Version of package(s) in repository `roscompile`:
+
+- upstream repository: https://github.com/DLu/roscompile.git
+- release repository: https://github.com/wu-robotics/roscompile-release.git
+- rosdistro version: `1.0.3-1`
+- old version: `1.0.3-1`
+- new version: `1.1.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.10.0`
+- catkin_pkg version: `0.4.23`
+- rosdep version: `0.19.0`
+- rosdistro version: `0.8.3`
+- vcstools version: `0.1.42`
+
+
 ## roscompile (kinetic) - 1.1.0-1
 
 The packages in the `roscompile` repository were released into the `kinetic` distro by running `/usr/bin/bloom-release roscompile -r kinetic` on `Thu, 19 Nov 2020 20:11:57 -0000`
