@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.0.2)
 project(roscompile)
 
 find_package(catkin REQUIRED
@@ -25,7 +25,14 @@ if(CATKIN_ENABLE_TESTING)
   roslint_add_test()
 endif()
 
-catkin_install_python(PROGRAMS scripts/roscompile scripts/add_tests scripts/convert_to_format_2 scripts/add_compile_options scripts/roscompile_command
+catkin_install_python(PROGRAMS
+                      scripts/roscompile
+                      scripts/add_tests
+                      scripts/convert_to_format_2
+                      scripts/add_compile_options
+                      scripts/roscompile_command
+                      scripts/upgrade_manifest
+                      scripts/noetic_migration
                       DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 install(FILES data/cmake.ignore data/cmake_patterns.ignore data/package.ignore data/package_patterns.ignore
