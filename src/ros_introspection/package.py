@@ -1,13 +1,14 @@
 import collections
+
+from .cmake_parser import parse_file
+from .launch import Launch
 from .package_structure import get_package_structure
 from .package_xml import PackageXML
-from .cmake_parser import parse_file
-from .urdf import UrdfFile
-from .source_code import SourceCode
+from .plugin_xml import PluginXML
 from .ros_generator import ROSGenerator
 from .setup_py import SetupPy
-from .launch import Launch
-from .plugin_xml import PluginXML
+from .source_code import SourceCode
+from .urdf import UrdfFile
 
 
 class Package:
@@ -43,6 +44,9 @@ class Package:
         for rel_fn, path in package_structure['urdf'].items():
             self.urdf_files.append(UrdfFile(rel_fn, path))
         self.misc_files = list(package_structure[None].keys())
+
+    def is_metapackage(self):
+        return self.manifest.is_metapackage() or self.cmake.is_metapackage()
 
     def get_build_dependencies(self):
         return self.source_code.get_build_dependencies()
