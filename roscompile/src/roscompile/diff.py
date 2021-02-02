@@ -1,13 +1,17 @@
 #!/usr/bin/python
 
-from ros_introspection.package import Package
-from .terminal import color_header, color_diff
 import collections
-import tempfile
-import shutil
-import os
 import difflib
+import inspect
+import os
+import shutil
+import tempfile
 from filecmp import dircmp
+
+from ros_introspection.package import Package
+from ros_introspection.util import get_sibling_packages
+
+from .terminal import color_diff, color_header
 
 
 def get_diff_helper(dcmp, folder=''):
@@ -59,7 +63,14 @@ def preview_changes(package, fn_name, fne, use_package_name=False):
         new_package_root = os.path.join(temp_dir, package.name)
         shutil.copytree(package.root, new_package_root)
         new_pkg = Package(new_package_root)
-        fne(new_pkg)
+
+        # Special case for metapackage rules, since the sibling packages
+        # require knowing the names of packages outside of the package's file root
+        # thus will not be copied with the above copytree operation
+        if 'sibling_packages' in inspect.getargspec(fne).args:
+            fne(new_pkg, sibling_packages=get_sibling_packages(package))
+        else:
+            fne(new_pkg)
         new_pkg.write()
         the_diff = get_diff(package.root, new_package_root)
         if len(the_diff) == 0:
@@ -81,6 +92,7 @@ def preview_changes(package, fn_name, fne, use_package_name=False):
         shutil.copytree(package.root, new_package_root)
         shutil.rmtree(temp_dir)
     return True
+
 
 def prepare_diff_lines(string_a, string_b):
     a_lines = string_a.split('\n')
