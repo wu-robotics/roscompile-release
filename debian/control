@@ -1,0 +1,12 @@
+Source: ros-kinetic-magical-ros2-conversion-tool
+Section: misc
+Priority: optional
+Maintainer: David V. Lu!! <davidvlu@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-kinetic-catkin, ros-kinetic-ros-introspection, ros-kinetic-roscompile, ros-kinetic-roslint
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-kinetic-magical-ros2-conversion-tool
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-kinetic-ros-introspection, ros-kinetic-roscompile
+Description: The magical_ros2_conversion_tool package
