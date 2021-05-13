@@ -1,1 +1,1 @@
-{"trim": "", "base": "58cdd8e", "trimbase": "", "parent": "debian/noetic/roscompile", "previous": "b2ffba9"}
+{"base": "a52ca7e", "parent": "debian/noetic/roscompile", "previous": "13448d0", "trim": "", "trimbase": ""}
