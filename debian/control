@@ -1,0 +1,12 @@
+Source: ros-melodic-magical-ros2-conversion-tool
+Section: misc
+Priority: optional
+Maintainer: David V. Lu!! <davidvlu@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-melodic-catkin, ros-melodic-ros-introspection, ros-melodic-roscompile, ros-melodic-roslint
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-melodic-magical-ros2-conversion-tool
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-melodic-ros-introspection, ros-melodic-roscompile
+Description: The magical_ros2_conversion_tool package
